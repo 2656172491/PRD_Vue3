@@ -3,26 +3,51 @@
     <div class="toggle-btn" @click="isCollapsed = !isCollapsed">
       <el-icon><ArrowLeft v-if="!isCollapsed" /><ArrowRight v-else /></el-icon>
     </div>
+
     <div v-if="!isCollapsed" class="sidebar-content">
+      <!-- 分组管理 -->
       <div class="section">
-        <h3>分组</h3>
+        <div class="section-header">
+          <h3>分组</h3>
+          <el-button text :icon="Plus" size="small" @click="showAddGroup = true">新建</el-button>
+        </div>
         <div class="group-list">
           <div
             v-for="group in graphStore.groups"
             :key="group.id"
             class="group-item"
             :style="{ borderLeftColor: group.color || '#38bdf8' }"
+            @click="handleSelectGroup(group.id)"
+            :class="{ active: selectedGroupId === group.id }"
           >
             <span class="group-name">{{ group.name }}</span>
             <span class="group-count">{{ getGroupCount(group.id) }}</span>
           </div>
+          <div v-if="graphStore.groups.length === 0" class="empty-hint">
+            暂无分组
+          </div>
         </div>
-        <el-button text :icon="Plus" @click="showAddGroup = true">新建分组</el-button>
       </div>
+
+      <!-- 关系类型管理 -->
       <div class="section">
-        <h3>数据</h3>
-        <el-button text :icon="Download" @click="handleExport">导出 JSON</el-button>
-        <el-button text :icon="Upload" @click="showImport = true">导入 JSON</el-button>
+        <div class="section-header">
+          <h3>关系类型</h3>
+          <el-button text :icon="Plus" size="small" @click="showAddRelationType = true">新建</el-button>
+        </div>
+        <div class="relation-type-list">
+          <div
+            v-for="type in graphStore.relationTypes"
+            :key="type"
+            class="relation-type-item"
+          >
+            <span class="type-dot" :style="{ background: getTypeColor(type) }" />
+            <span class="type-name">{{ type }}</span>
+          </div>
+          <div v-if="graphStore.relationTypes.length === 0" class="empty-hint">
+            暂无关系类型
+          </div>
+        </div>
       </div>
     </div>
 
@@ -42,26 +67,16 @@
       </template>
     </el-dialog>
 
-    <!-- 导入弹窗 -->
-    <el-dialog v-model="showImport" title="导入数据" width="500px">
-      <el-upload
-        drag
-        action="#"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        accept=".json"
-      >
-        <el-icon class="el-icon--upload"><Upload /></el-icon>
-        <div class="el-upload__text">拖拽文件到此处或 <em>点击上传</em></div>
-      </el-upload>
-      <div v-if="importPreview" class="import-preview">
-        <p>新增: {{ importPreview.newCount }} 人</p>
-        <p>更新: {{ importPreview.updateCount }} 人</p>
-        <p>无效: {{ importPreview.invalidCount }} 人</p>
-      </div>
+    <!-- 新建关系类型弹窗 -->
+    <el-dialog v-model="showAddRelationType" title="新建关系类型" width="360px">
+      <el-form :model="relationTypeForm" label-width="60px">
+        <el-form-item label="名称">
+          <el-input v-model="relationTypeForm.name" placeholder="关系类型名称" />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="showImport = false">取消</el-button>
-        <el-button type="primary" @click="handleImport">导入</el-button>
+        <el-button @click="showAddRelationType = false">取消</el-button>
+        <el-button type="primary" @click="handleCreateRelationType">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -69,77 +84,81 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { ArrowLeft, ArrowRight, Plus, Download, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Plus } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { createGroup, getGroups } from '../api/group'
-import { exportJson, previewImport, importJson } from '../api/exportImport'
-import { getPersons } from '../api/person'
-import { getRelationships } from '../api/relationship'
+import { createRelationType, getRelationTypes } from '../api/relationType'
 import { ElMessage } from 'element-plus'
 
 const graphStore = useGraphStore()
 const isCollapsed = ref(false)
+const selectedGroupId = ref<number | null>(null)
+
+// 分组
 const showAddGroup = ref(false)
-const showImport = ref(false)
 const groupForm = ref({ name: '', color: '#38bdf8' })
-const importData = ref<any>(null)
-const importPreview = ref<any>(null)
+
+// 关系类型
+const showAddRelationType = ref(false)
+const relationTypeForm = ref({ name: '' })
+
+// 关系类型颜色映射
+const typeColorMap: Record<string, string> = {}
+const typeColors = ['#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#fb7185', '#34d399', '#fbbf24', '#a78bfa']
+
+const getTypeColor = (type: string) => {
+  if (!typeColorMap[type]) {
+    const idx = Object.keys(typeColorMap).length % typeColors.length
+    typeColorMap[type] = typeColors[idx]
+  }
+  return typeColorMap[type]
+}
 
 const getGroupCount = (groupId: number) => {
   return graphStore.persons.filter((p) => p.groupId === groupId).length
 }
 
+const handleSelectGroup = (groupId: number) => {
+  selectedGroupId.value = selectedGroupId.value === groupId ? null : groupId
+  // 可选：触发分组筛选逻辑
+}
+
 const handleCreateGroup = async () => {
-  if (!groupForm.value.name.trim()) return
-  await createGroup(groupForm.value)
-  const groups = await getGroups()
-  graphStore.setGroups(groups)
-  showAddGroup.value = false
-  groupForm.value = { name: '', color: '#38bdf8' }
-  ElMessage.success('分组创建成功')
-}
-
-const handleExport = async () => {
-  const data = await exportJson()
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `relationship_backup_${new Date().toISOString().slice(0, 10)}.json`
-  a.click()
-  URL.revokeObjectURL(url)
-  ElMessage.success('导出成功')
-}
-
-const handleFileChange = async (file: any) => {
-  const reader = new FileReader()
-  reader.onload = async (e) => {
-    try {
-      const data = JSON.parse(e.target?.result as string)
-      importData.value = data
-      importPreview.value = await previewImport(data)
-    } catch (err) {
-      ElMessage.error('文件解析失败')
-    }
+  if (!groupForm.value.name.trim()) {
+    ElMessage.warning('请输入分组名称')
+    return
   }
-  reader.readAsText(file.raw)
+  try {
+    await createGroup(groupForm.value)
+    const groups = await getGroups()
+    graphStore.setGroups(groups || [])
+    showAddGroup.value = false
+    groupForm.value = { name: '', color: '#38bdf8' }
+    ElMessage.success('分组创建成功')
+  } catch (err) {
+    ElMessage.error('创建失败')
+  }
 }
 
-const handleImport = async () => {
-  if (!importData.value) return
-  await importJson({ mode: 'merge', data: importData.value })
-  const [persons, relationships, groups] = await Promise.all([
-    getPersons(),
-    getRelationships(),
-    getGroups(),
-  ])
-  graphStore.setPersons(persons)
-  graphStore.setRelationships(relationships)
-  graphStore.setGroups(groups)
-  showImport.value = false
-  importData.value = null
-  importPreview.value = null
-  ElMessage.success('导入成功')
+const handleCreateRelationType = async () => {
+  if (!relationTypeForm.value.name.trim()) {
+    ElMessage.warning('请输入关系类型名称')
+    return
+  }
+  if (graphStore.relationTypes.includes(relationTypeForm.value.name.trim())) {
+    ElMessage.warning('该关系类型已存在')
+    return
+  }
+  try {
+    await createRelationType({ typeName: relationTypeForm.value.name.trim() })
+    const types = await getRelationTypes()
+    graphStore.setRelationTypes(types.map((t: any) => t.typeName))
+    showAddRelationType.value = false
+    relationTypeForm.value = { name: '' }
+    ElMessage.success('关系类型创建成功')
+  } catch (err) {
+    ElMessage.error('创建失败')
+  }
 }
 </script>
 
@@ -151,6 +170,7 @@ const handleImport = async () => {
   background: rgba(15, 23, 42, 0.9);
   border-right: 1px solid rgba(148, 163, 184, 0.1);
   transition: width 0.3s ease;
+  flex-shrink: 0;
 
   &.collapsed {
     width: 36px;
@@ -188,6 +208,13 @@ const handleImport = async () => {
 
 .section {
   margin-bottom: 24px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
 
   h3 {
     font-size: 12px;
@@ -195,12 +222,13 @@ const handleImport = async () => {
     color: #64748b;
     text-transform: uppercase;
     letter-spacing: 1px;
-    margin-bottom: 12px;
   }
 }
 
 .group-list {
-  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .group-item {
@@ -208,7 +236,6 @@ const handleImport = async () => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  margin-bottom: 4px;
   background: rgba(30, 41, 59, 0.5);
   border-left: 3px solid;
   border-radius: 0 6px 6px 0;
@@ -217,6 +244,10 @@ const handleImport = async () => {
 
   &:hover {
     background: rgba(30, 41, 59, 0.8);
+  }
+
+  &.active {
+    background: rgba(56, 189, 248, 0.1);
   }
 
   .group-name {
@@ -233,16 +264,42 @@ const handleImport = async () => {
   }
 }
 
-.import-preview {
-  margin-top: 16px;
-  padding: 12px;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 8px;
+.relation-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
-  p {
-    font-size: 13px;
-    color: #cbd5e1;
-    margin: 4px 0;
+.relation-type-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(30, 41, 59, 0.3);
+  border-radius: 6px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(30, 41, 59, 0.6);
   }
+
+  .type-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .type-name {
+    font-size: 13px;
+    color: #e2e8f0;
+  }
+}
+
+.empty-hint {
+  text-align: center;
+  padding: 12px;
+  color: #475569;
+  font-size: 12px;
 }
 </style>

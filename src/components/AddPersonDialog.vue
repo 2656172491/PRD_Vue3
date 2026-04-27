@@ -5,14 +5,17 @@
         <el-input v-model="form.name" placeholder="请输入姓名" />
       </el-form-item>
       <el-form-item label="分组">
-        <el-select v-model="form.groupId" placeholder="选择分组" clearable style="width: 100%">
-          <el-option
-            v-for="group in graphStore.groups"
-            :key="group.id"
-            :label="group.name"
-            :value="group.id"
-          />
-        </el-select>
+        <div class="group-row">
+          <el-select v-model="form.groupId" placeholder="选择分组" clearable style="width: 100%">
+            <el-option
+              v-for="group in graphStore.groups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.id"
+            />
+          </el-select>
+          <el-button @click="showAddGroup = true">新建分组</el-button>
+        </div>
       </el-form-item>
 
       <!-- 预设常用字段 -->
@@ -37,6 +40,21 @@
       <el-button type="primary" @click="handleSubmit">确定</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="showAddGroup" title="新建分组" width="360px">
+    <el-form :model="groupForm" label-width="60px">
+      <el-form-item label="名称">
+        <el-input v-model="groupForm.name" placeholder="分组名称" />
+      </el-form-item>
+      <el-form-item label="颜色">
+        <el-color-picker v-model="groupForm.color" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showAddGroup = false">取消</el-button>
+      <el-button type="primary" @click="handleCreateGroup">确定</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -44,15 +62,21 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { createPerson, getPersons } from '../api/person'
+import { createGroup, getGroups } from '../api/group'
 import { ElMessage } from 'element-plus'
 
 const graphStore = useGraphStore()
 const visible = ref(false)
+const showAddGroup = ref(false)
 const form = ref<any>({
   name: '',
   groupId: null,
   positionX: 0,
   positionY: 0,
+})
+const groupForm = ref({
+  name: '',
+  color: '#38bdf8',
 })
 const presetData = ref<Record<string, string>>({
   phone: '',
@@ -79,6 +103,27 @@ const addExtraField = () => {
 
 const removeExtraField = (idx: number) => {
   extraFields.value.splice(idx, 1)
+}
+
+const handleCreateGroup = async () => {
+  if (!groupForm.value.name.trim()) {
+    ElMessage.warning('请输入分组名称')
+    return
+  }
+  const created = await createGroup(groupForm.value)
+  const groups = await getGroups()
+  graphStore.setGroups(groups || [])
+  if (typeof created === 'number') {
+    form.value.groupId = created
+  } else if (created && typeof created === 'object' && 'id' in created) {
+    form.value.groupId = Number((created as { id: number }).id)
+  } else {
+    const match = [...(groups || [])].reverse().find((g) => g.name === groupForm.value.name)
+    if (match) form.value.groupId = match.id
+  }
+  showAddGroup.value = false
+  groupForm.value = { name: '', color: '#38bdf8' }
+  ElMessage.success('分组创建成功')
 }
 
 const handleSubmit = async () => {
@@ -130,5 +175,11 @@ onUnmounted(() => {
   gap: 8px;
   margin-bottom: 8px;
   align-items: center;
+}
+
+.group-row {
+  width: 100%;
+  display: flex;
+  gap: 8px;
 }
 </style>

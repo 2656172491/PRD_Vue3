@@ -7,4 +7,11 @@ export const createPerson = (data: any) => request.post('/persons', data)
 export const updatePerson = (id: number, data: any) => request.put(`/persons/${id}`, data)
 export const deletePerson = (id: number) => request.delete(`/persons/${id}`)
 export const batchUpdatePositions = (data: any) => request.put('/persons/batch/positions', data)
-export const batchMoveToGroup = (data: any) => request.put('/persons/batch/group', data)
+export const batchMoveToGroup = (data: any) => {
+  const payload = { ...data }
+  if (payload.groupId !== undefined && payload.groupsId === undefined) {
+    payload.groupsId = payload.groupId
+    delete payload.groupId
+  }
+  return request.put('/persons/batch/group', payload)
+}

@@ -3,8 +3,10 @@
     <TopBar />
     <div class="main-content">
       <SideBar />
-      <GraphCanvas />
-      <PersonDetail />
+      <div class="graph-area">
+        <GraphCanvas />
+        <PersonDetail />
+      </div>
     </div>
     <AddPersonDialog />
     <RelationTypeDialog />
@@ -32,6 +34,13 @@ import RelationTypeDialog from '../components/RelationTypeDialog.vue'
 .main-content {
   display: flex;
   flex: 1;
+  overflow: hidden;
+}
+
+.graph-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
 }
 </style>

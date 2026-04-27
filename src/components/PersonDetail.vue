@@ -11,6 +11,12 @@
             {{ group.name }}
           </span>
         </div>
+        <el-button class="edit-btn" text size="small" @click="openEditDialog">
+          编辑
+        </el-button>
+        <el-button class="self-btn" text size="small" @click="setAsSelf">
+          {{ isSelf ? '已设为我' : '设为我' }}
+        </el-button>
         <el-button class="close-btn" text :icon="Close" @click="graphStore.selectNode(null)" />
       </div>
 
@@ -61,6 +67,52 @@
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="editVisible" title="编辑节点" width="520px">
+      <div v-if="person" class="edit-dialog-content">
+        <el-form label-width="90px">
+          <el-form-item label="姓名">
+            <el-input v-model="editName" />
+          </el-form-item>
+          <el-form-item label="分组">
+            <el-select v-model="editGroupId" placeholder="选择分组" clearable style="width: 100%">
+              <el-option v-for="g in graphStore.groups" :key="g.id" :label="g.name" :value="g.id" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+
+        <div class="edit-relations">
+          <h4>新增连接关系</h4>
+          <div class="relation-form-row">
+            <el-select v-model="relationTargetId" placeholder="选择目标节点" style="width: 45%">
+              <el-option
+                v-for="p in relationCandidates"
+                :key="p.id"
+                :label="p.name"
+                :value="p.id"
+              />
+            </el-select>
+            <el-select v-model="relationTypesForCreate" multiple placeholder="关系类型" style="width: 55%">
+              <el-option v-for="t in graphStore.relationTypes" :key="t" :label="t" :value="t" />
+            </el-select>
+          </div>
+          <el-button type="primary" size="small" @click="handleCreateRelationFromDialog">添加关系</el-button>
+        </div>
+
+        <div class="edit-relations">
+          <h4>已有关系</h4>
+          <div v-if="relatedRelations.length === 0" class="empty-relations">暂无关联关系</div>
+          <div v-for="rel in relatedRelations" :key="rel.id" class="relation-row">
+            <span>{{ getOtherPersonName(rel) }}（{{ rel.relationTypes?.join(' / ') || '未标注' }}）</span>
+            <el-button text type="danger" size="small" @click="handleDeleteRelationFromDialog(rel.id)">删除</el-button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveMetaFromDialog">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -69,9 +121,12 @@ import { ref, computed, watch } from 'vue'
 import { Close, Plus, Delete } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { updatePerson } from '../api/person'
+import { createRelationship, deleteRelationship, getRelationships, rebuildVirtualRelationships } from '../api/relationship'
 import { ElMessage } from 'element-plus'
 
 const graphStore = useGraphStore()
+const SELF_PERSON_KEY = 'prd-self-person-id'
+const selfPersonId = ref(localStorage.getItem(SELF_PERSON_KEY))
 
 const person = computed(() => {
   if (!graphStore.selectedNodeId) return null
@@ -89,6 +144,17 @@ const avatarGradient = computed(() => {
   const c1 = colors[idx]
   const c2 = colors[(idx + 1) % colors.length]
   return `linear-gradient(135deg, ${c1}, ${c2})`
+})
+
+const isSelf = computed(() => {
+  if (!person.value) return false
+  return selfPersonId.value === String(person.value.id)
+})
+
+const relationCandidates = computed(() => {
+  if (!person.value) return []
+  const currentId = String(person.value.id)
+  return graphStore.persons.filter((p) => String(p.id) !== currentId)
 })
 
 const relatedRelations = computed(() => {
@@ -113,11 +179,36 @@ const jumpToPerson = (id: number) => {
   graphStore.selectNode(String(id))
 }
 
+const refreshRelationships = async () => {
+  const relationships = await getRelationships()
+  graphStore.setRelationships(relationships || [])
+}
+
+const setAsSelf = () => {
+  if (!person.value) return
+  const id = String(person.value.id)
+  localStorage.setItem(SELF_PERSON_KEY, id)
+  selfPersonId.value = id
+  rebuildVirtualRelationships(Number(id))
+    .then(async () => {
+      await refreshRelationships()
+      window.dispatchEvent(new CustomEvent('self-person-changed'))
+      ElMessage.success('已设置为中心人物，并生成虚拟关系边')
+    })
+    .catch(() => {
+      ElMessage.error('中心人物已设置，但虚拟关系边生成失败')
+    })
+}
+
 // 编辑状态
 const editName = ref('')
 const editData = ref<Record<string, string>>({})
 const newFieldKey = ref('')
 const newFieldValue = ref('')
+const editVisible = ref(false)
+const editGroupId = ref<number | null>(null)
+const relationTargetId = ref<number | null>(null)
+const relationTypesForCreate = ref<string[]>([])
 
 watch(() => person.value, (p) => {
   if (p) {
@@ -128,8 +219,17 @@ watch(() => person.value, (p) => {
         editData.value[k] = v != null ? String(v) : ''
       })
     }
+    editGroupId.value = p.groupId ?? null
   }
 }, { immediate: true })
+
+const openEditDialog = () => {
+  if (!person.value) return
+  editGroupId.value = person.value.groupId ?? null
+  relationTargetId.value = null
+  relationTypesForCreate.value = []
+  editVisible.value = true
+}
 
 const addField = () => {
   if (!newFieldKey.value.trim()) {
@@ -167,19 +267,70 @@ const handleSave = async () => {
   })
   ElMessage.success('保存成功')
 }
+
+const handleSaveMetaFromDialog = async () => {
+  if (!person.value) return
+  await updatePerson(Number(person.value.id), {
+    name: editName.value,
+    data: { ...editData.value },
+    groupId: editGroupId.value,
+  })
+  graphStore.updatePerson({
+    id: person.value.id,
+    name: editName.value,
+    data: { ...editData.value },
+    groupId: editGroupId.value,
+  })
+  editVisible.value = false
+  ElMessage.success('节点信息已保存')
+}
+
+const handleCreateRelationFromDialog = async () => {
+  if (!person.value) return
+  if (!relationTargetId.value) {
+    ElMessage.warning('请选择目标节点')
+    return
+  }
+  if (!relationTypesForCreate.value.length) {
+    ElMessage.warning('请选择关系类型')
+    return
+  }
+  await createRelationship({
+    fromPersonId: Number(person.value.id),
+    toPersonId: Number(relationTargetId.value),
+    relationTypes: relationTypesForCreate.value,
+    isVirtual: false,
+  })
+  await refreshRelationships()
+  relationTargetId.value = null
+  relationTypesForCreate.value = []
+  ElMessage.success('关系添加成功')
+}
+
+const handleDeleteRelationFromDialog = async (relationId: number) => {
+  await deleteRelationship(Number(relationId))
+  await refreshRelationships()
+  ElMessage.success('关系删除成功')
+}
 </script>
 
 <style scoped lang="scss">
 .person-detail {
+  position: absolute;
+  top: 0;
+  right: 0;
   width: 0;
   height: 100%;
   background: rgba(15, 23, 42, 0.95);
   border-left: 1px solid rgba(148, 163, 184, 0.1);
   overflow: hidden;
   transition: width 0.3s ease;
+  z-index: 20;
+  pointer-events: none;
 
   &.open {
     width: 320px;
+    pointer-events: auto;
   }
 }
 
@@ -238,6 +389,24 @@ const handleSave = async () => {
 
     &:hover {
       color: #e2e8f0;
+    }
+  }
+
+  .self-btn {
+    color: #fbbf24;
+    padding: 0 8px;
+
+    &:hover {
+      color: #fde68a;
+    }
+  }
+
+  .edit-btn {
+    color: #38bdf8;
+    padding: 0 8px;
+
+    &:hover {
+      color: #7dd3fc;
     }
   }
 }
@@ -366,5 +535,35 @@ const handleSave = async () => {
   padding: 20px;
   color: #475569;
   font-size: 13px;
+}
+
+.edit-dialog-content {
+  .edit-relations {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.15);
+  }
+
+  h4 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: #cbd5e1;
+  }
+
+  .relation-form-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .relation-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    color: #e2e8f0;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
 }
 </style>

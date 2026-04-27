@@ -15,8 +15,8 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import G6 from '@antv/g6'
 import { useGraphStore } from '../stores/graphStore'
-import { getPersons, deletePerson, batchUpdatePositions } from '../api/person'
-import { getRelationships, createRelationship } from '../api/relationship'
+import { getPersons, deletePerson } from '../api/person'
+import { getRelationships } from '../api/relationship'
 import { getGroups } from '../api/group'
 import { getRelationTypes } from '../api/relationType'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -24,7 +24,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const containerRef = ref<HTMLDivElement>()
 const graphStore = useGraphStore()
 let graph: any = null
-let positionTimer: any = null
+let resizeObserver: ResizeObserver | null = null
+let keydownHandler: ((e: KeyboardEvent) => void) | null = null
+let selfChangeHandler: (() => void) | null = null
+const SELF_PERSON_KEY = 'prd-self-person-id'
 
 const getGroupColor = (groupId: number | null) => {
   if (!groupId) return '#38bdf8'
@@ -32,93 +35,121 @@ const getGroupColor = (groupId: number | null) => {
   return group?.color || '#38bdf8'
 }
 
-const buildGraphData = () => {
-  const nodes = graphStore.persons.map((p) => ({
-    id: String(p.id),
-    type: 'circle',
-    x: p.positionX || Math.random() * 800,
-    y: p.positionY || Math.random() * 600,
-    size: 48,
-    label: p.name,
-    style: {
-      fill: getGroupColor(p.groupId),
-      stroke: '#0f172a',
-      lineWidth: 3,
-      shadowColor: 'rgba(56, 189, 248, 0.4)',
-      shadowBlur: 12,
-    },
-    labelCfg: {
-      position: 'bottom',
-      style: {
-        fill: '#e2e8f0',
-        fontSize: 12,
-        fontFamily: 'Noto Sans SC, sans-serif',
-      },
-    },
-    anchorPoints: [
-      [0, 0.5],
-      [1, 0.5],
-      [0.5, 0],
-      [0.5, 1],
-    ],
-  }))
+const getCanvasSize = () => {
+  const width = containerRef.value?.clientWidth || 1
+  const height = containerRef.value?.clientHeight || 1
+  return { width, height }
+}
 
-  const edges = graphStore.relationships.map((r) => ({
-    id: String(r.id),
-    source: String(r.fromPersonId),
-    target: String(r.toPersonId),
-    label: r.relationTypes?.join(' / ') || '',
-    style: {
-      stroke: 'rgba(148, 163, 184, 0.4)',
-      lineWidth: 1.5,
-      endArrow: {
-        path: G6.Arrow.triangle(6, 8, 0),
-        fill: 'rgba(148, 163, 184, 0.4)',
-      },
-    },
-    labelCfg: {
-      autoRotate: true,
+const toFiniteNumber = (value: unknown, fallback: number) => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+const getSelfPersonId = (): string | null => {
+  const persons = graphStore.persons || []
+  if (persons.length === 0) return null
+
+  const selfFromStorage = localStorage.getItem(SELF_PERSON_KEY)
+  if (selfFromStorage && persons.some((p) => String(p.id) === selfFromStorage)) {
+    return selfFromStorage
+  }
+
+  const explicitSelf = persons.find((p) => p?.data?.isSelf === true || p?.data?.isSelf === 'true')
+  if (explicitSelf) return String(explicitSelf.id)
+
+  if (graphStore.selectedNodeId && persons.some((p) => String(p.id) === graphStore.selectedNodeId)) {
+    return String(graphStore.selectedNodeId)
+  }
+
+  const byName = persons.find((p) => ['我', '自己', '本人'].includes((p?.name || '').trim()))
+  if (byName) return String(byName.id)
+
+  return null
+}
+
+const buildGraphData = () => {
+  const { width, height } = getCanvasSize()
+  const centerX = width / 2
+  const centerY = height / 2
+  const selfId = getSelfPersonId()
+  const others = graphStore.persons.filter((p) => String(p.id) !== selfId)
+  const ringRadius = Math.max(160, Math.min(width, height) * 0.32)
+
+  const nodes = graphStore.persons.map((p) => {
+    const id = String(p.id)
+    const isSelf = id === selfId
+    const selfAwareIndex = others.findIndex((item) => String(item.id) === id)
+    const angle = (selfAwareIndex / Math.max(others.length, 1)) * Math.PI * 2
+    const defaultX = isSelf ? centerX : centerX + ringRadius * Math.cos(angle)
+    const defaultY = isSelf ? centerY : centerY + ringRadius * Math.sin(angle)
+
+    return {
+      id,
+      type: 'circle',
+      x: toFiniteNumber(p.positionX, defaultX),
+      y: toFiniteNumber(p.positionY, defaultY),
+      size: isSelf ? 58 : 48,
+      label: isSelf ? `${p.name}（我）` : p.name,
       style: {
-        fill: '#94a3b8',
-        fontSize: 10,
-        background: {
-          fill: '#0f172a',
-          padding: [2, 4],
-          radius: 4,
+        fill: isSelf ? '#fbbf24' : getGroupColor(p.groupId),
+        stroke: '#0f172a',
+        lineWidth: isSelf ? 4 : 3,
+      },
+      labelCfg: {
+        position: 'bottom',
+        style: {
+          fill: '#e2e8f0',
+          fontSize: isSelf ? 13 : 12,
+          fontWeight: isSelf ? 700 : 500,
+          fontFamily: 'Noto Sans SC, sans-serif',
         },
       },
-    },
-  }))
+      anchorPoints: [
+        [0, 0.5],
+        [1, 0.5],
+        [0.5, 0],
+        [0.5, 1],
+      ],
+    }
+  })
 
-  return { nodes, edges }
+  const realEdges = graphStore.relationships.map((r) => {
+    const isVirtual = !!r.isVirtual
+    return {
+      id: String(r.id),
+      source: String(r.fromPersonId),
+      target: String(r.toPersonId),
+      label: undefined,
+      style: {
+        stroke: isVirtual ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.4)',
+        lineWidth: isVirtual ? 1 : 1.5,
+        endArrow: isVirtual
+          ? undefined
+          : {
+              path: G6.Arrow.triangle(6, 8, 0),
+              fill: 'rgba(148, 163, 184, 0.4)',
+            },
+      },
+      labelCfg: undefined,
+    }
+  })
+
+  return { nodes, edges: realEdges }
 }
 
 const initGraph = () => {
   if (!containerRef.value) return
 
-  const width = containerRef.value.clientWidth
-  const height = containerRef.value.clientHeight
+  const { width, height } = getCanvasSize()
 
   graph = new G6.Graph({
     container: containerRef.value,
     width,
     height,
+    renderer: 'svg',
     modes: {
       default: [
-        'drag-canvas',
         'zoom-canvas',
-        'drag-node',
-        {
-          type: 'create-edge',
-          trigger: 'drag',
-          edgeConfig: {
-            style: {
-              stroke: '#38bdf8',
-              lineDash: [4, 4],
-              lineWidth: 2,
-            },
-          },
-        },
       ],
     },
     defaultNode: {
@@ -134,25 +165,14 @@ const initGraph = () => {
         cursor: 'pointer',
       },
     },
-    layout: {
-      type: 'force',
-      preventOverlap: true,
-      linkDistance: 150,
-      nodeStrength: -200,
-      edgeStrength: 0.5,
-    },
     nodeStateStyles: {
       selected: {
         stroke: '#f472b6',
         lineWidth: 4,
-        shadowColor: 'rgba(244, 114, 182, 0.6)',
-        shadowBlur: 20,
       },
       hover: {
         stroke: '#fbbf24',
         lineWidth: 3,
-        shadowColor: 'rgba(251, 191, 36, 0.5)',
-        shadowBlur: 16,
       },
     },
     edgeStateStyles: {
@@ -198,68 +218,28 @@ const initGraph = () => {
     window.dispatchEvent(new CustomEvent('add-person-at', { detail: { x: point.x, y: point.y } }))
   })
 
-  // 拖拽结束保存坐标
-  graph.on('node:dragend', () => {
-    savePositions()
-  })
-
-  // 连线完成
-  graph.on('aftercreateedge', async (evt: any) => {
-    const edge = evt.edge
-    const source = edge.getSource().get('id')
-    const target = edge.getTarget().get('id')
-
-    // 弹出关系类型选择
-    window.dispatchEvent(new CustomEvent('select-relation-type', {
-      detail: {
-        source,
-        target,
-        callback: async (types: string[]) => {
-          try {
-            const res = await createRelationship({
-              fromPersonId: parseInt(source),
-              toPersonId: parseInt(target),
-              relationTypes: types,
-            })
-            graphStore.addRelationship({
-              id: res,
-              fromPersonId: parseInt(source),
-              toPersonId: parseInt(target),
-              relationTypes: types,
-            })
-            ElMessage.success('关系建立成功')
-            refreshGraph()
-          } catch (err) {
-            ElMessage.error('建立关系失败')
-          }
-        },
-      },
-    }))
-
-    // 移除临时边
-    graph.removeItem(edge)
-  })
-
   // 右键菜单
   graph.on('node:contextmenu', (evt: any) => {
-    evt.evt.preventDefault()
-    const nodeId = evt.item.get('id')
+    evt?.evt?.preventDefault?.()
+    const nodeId = evt?.item?.get?.('id')
+    if (!nodeId) return
     showNodeContextMenu(nodeId)
   })
 
   graph.on('edge:contextmenu', (evt: any) => {
-    evt.evt.preventDefault()
-    const edgeId = evt.item.get('id')
+    evt?.evt?.preventDefault?.()
+    const edgeId = evt?.item?.get?.('id')
+    if (!edgeId) return
     showEdgeContextMenu(edgeId)
   })
 
   graph.on('canvas:contextmenu', (evt: any) => {
-    evt.evt.preventDefault()
+    evt?.evt?.preventDefault?.()
     showCanvasContextMenu()
   })
 
   // 键盘事件
-  const handleKeydown = (e: KeyboardEvent) => {
+  keydownHandler = (e: KeyboardEvent) => {
     if (e.key === 'Delete' && graphStore.selectedNodeId) {
       handleDeleteNode(graphStore.selectedNodeId)
     }
@@ -272,7 +252,7 @@ const initGraph = () => {
       }
     }
   }
-  document.addEventListener('keydown', handleKeydown)
+  document.addEventListener('keydown', keydownHandler)
 
   // 监听数据变化
   watch(() => [graphStore.persons, graphStore.relationships], () => {
@@ -297,35 +277,36 @@ const initGraph = () => {
     }
   })
 
-  refreshGraph()
-
-  return () => {
-    document.removeEventListener('keydown', handleKeydown)
-  }
+  const data = buildGraphData()
+  graph.data(data)
+  graph.render()
 }
 
 const refreshGraph = () => {
   if (!graph || graph.destroyed) return
   const data = buildGraphData()
-  graph.changeData(data)
-  graph.refresh()
+  graph.data(data)
+  graph.render()
 }
 
-const savePositions = () => {
-  if (positionTimer) clearTimeout(positionTimer)
-  positionTimer = setTimeout(async () => {
+const centerOnSelf = () => {
+  if (!graph || graph.destroyed) return
+  const selfId = getSelfPersonId()
+  if (!selfId) return
+  const node = graph.findById(selfId)
+  if (!node) return
+  graph.focusItem(node, true, { duration: 300, easing: 'easeCubic' })
+}
+
+const setupResizeObserver = () => {
+  if (!containerRef.value || typeof ResizeObserver === 'undefined') return
+  resizeObserver = new ResizeObserver(() => {
     if (!graph || graph.destroyed) return
-    const nodes = graph.getNodes()
-    const positions = nodes.map((node: any) => {
-      const model = node.getModel()
-      return {
-        id: parseInt(model.id),
-        positionX: model.x,
-        positionY: model.y,
-      }
-    })
-    await batchUpdatePositions({ positions })
-  }, 300)
+    const { width, height } = getCanvasSize()
+    graph.changeSize(width, height)
+    refreshGraph()
+  })
+  resizeObserver.observe(containerRef.value)
 }
 
 const showNodeContextMenu = (_nodeId: string) => {
@@ -374,21 +355,41 @@ onMounted(() => {
   loadData().then(() => {
     nextTick(() => {
       initGraph()
+      setupResizeObserver()
+      centerOnSelf()
     })
   })
+
+  selfChangeHandler = () => {
+    refreshGraph()
+    centerOnSelf()
+  }
+  window.addEventListener('self-person-changed', selfChangeHandler)
 })
 
 onUnmounted(() => {
+  if (keydownHandler) {
+    document.removeEventListener('keydown', keydownHandler)
+    keydownHandler = null
+  }
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (selfChangeHandler) {
+    window.removeEventListener('self-person-changed', selfChangeHandler)
+    selfChangeHandler = null
+  }
   if (graph && !graph.destroyed) {
     graph.destroy()
   }
-  if (positionTimer) clearTimeout(positionTimer)
 })
 </script>
 
 <style scoped lang="scss">
 .graph-canvas {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   position: relative;
   overflow: hidden;
   background: #0f172a;
