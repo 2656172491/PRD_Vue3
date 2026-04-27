@@ -15,21 +15,16 @@
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import G6 from '@antv/g6'
 import { useGraphStore } from '../stores/graphStore'
-import { useHistoryStore } from '../stores/historyStore'
-import { getPersons, getRelationships, createPerson, updatePerson, deletePerson, batchUpdatePositions } from '../api/person'
-import { createRelationship, deleteRelationship } from '../api/relationship'
+import { getPersons, deletePerson, batchUpdatePositions } from '../api/person'
+import { getRelationships, createRelationship } from '../api/relationship'
 import { getGroups } from '../api/group'
 import { getRelationTypes } from '../api/relationType'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const containerRef = ref<HTMLDivElement>()
 const graphStore = useGraphStore()
-const historyStore = useHistoryStore()
 let graph: any = null
 let positionTimer: any = null
-
-// 颜色映射
-const groupColorMap: Record<string, string> = {}
 
 const getGroupColor = (groupId: number | null) => {
   if (!groupId) return '#38bdf8'
@@ -145,9 +140,6 @@ const initGraph = () => {
       linkDistance: 150,
       nodeStrength: -200,
       edgeStrength: 0.5,
-      onTick: () => {
-        // 力导向动画
-      },
     },
     nodeStateStyles: {
       selected: {
@@ -252,18 +244,18 @@ const initGraph = () => {
   graph.on('node:contextmenu', (evt: any) => {
     evt.evt.preventDefault()
     const nodeId = evt.item.get('id')
-    showNodeContextMenu(nodeId, evt.canvasX, evt.canvasY)
+    showNodeContextMenu(nodeId)
   })
 
   graph.on('edge:contextmenu', (evt: any) => {
     evt.evt.preventDefault()
     const edgeId = evt.item.get('id')
-    showEdgeContextMenu(edgeId, evt.canvasX, evt.canvasY)
+    showEdgeContextMenu(edgeId)
   })
 
   graph.on('canvas:contextmenu', (evt: any) => {
     evt.evt.preventDefault()
-    showCanvasContextMenu(evt.canvasX, evt.canvasY)
+    showCanvasContextMenu()
   })
 
   // 键盘事件
@@ -336,17 +328,16 @@ const savePositions = () => {
   }, 300)
 }
 
-const showNodeContextMenu = (nodeId: string, x: number, y: number) => {
-  // 使用 Element Plus 的 MessageBox 或自定义菜单
-  // 简化处理：直接提供操作
+const showNodeContextMenu = (_nodeId: string) => {
+  // 右键菜单功能可在此扩展
 }
 
-const showEdgeContextMenu = (edgeId: string, x: number, y: number) => {
-  // 简化处理
+const showEdgeContextMenu = (_edgeId: string) => {
+  // 右键菜单功能可在此扩展
 }
 
-const showCanvasContextMenu = (x: number, y: number) => {
-  // 简化处理
+const showCanvasContextMenu = () => {
+  // 右键菜单功能可在此扩展
 }
 
 const handleDeleteNode = async (nodeId: string) => {

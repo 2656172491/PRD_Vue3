@@ -68,12 +68,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { ArrowLeft, ArrowRight, Plus, Download, Upload } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { createGroup, getGroups } from '../api/group'
 import { exportJson, previewImport, importJson } from '../api/exportImport'
-import { getPersons, getRelationships } from '../api/person'
+import { getPersons } from '../api/person'
+import { getRelationships } from '../api/relationship'
 import { ElMessage } from 'element-plus'
 
 const graphStore = useGraphStore()
@@ -127,7 +128,6 @@ const handleFileChange = async (file: any) => {
 const handleImport = async () => {
   if (!importData.value) return
   await importJson({ mode: 'merge', data: importData.value })
-  // 刷新数据
   const [persons, relationships, groups] = await Promise.all([
     getPersons(),
     getRelationships(),

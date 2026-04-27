@@ -11,7 +11,7 @@ request.interceptors.response.use(
     if (res.code !== 200) {
       return Promise.reject(new Error(res.message || '请求失败'))
     }
-    return res.data
+    return res.data as any
   },
   (error) => {
     return Promise.reject(error)

@@ -24,7 +24,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus, RefreshLeft, RefreshRight, Search } from '@element-plus/icons-vue'
+import { Plus, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { useHistoryStore } from '../stores/historyStore'
 import { searchPersons } from '../api/person'
@@ -43,7 +43,6 @@ const handleSearch = async () => {
     return
   }
   const res = await searchPersons(searchKeyword.value)
-  // 高亮搜索结果
   if (res && res.length > 0) {
     graphStore.selectNode(String(res[0].id))
   }
@@ -55,7 +54,6 @@ const handleClear = () => {
 }
 
 const handleAdd = () => {
-  // 触发全局事件，由 GraphCanvas 处理
   window.dispatchEvent(new CustomEvent('add-person'))
 }
 

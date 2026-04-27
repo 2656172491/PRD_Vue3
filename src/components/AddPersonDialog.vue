@@ -45,11 +45,8 @@ const form = ref<any>({
   positionY: 0,
 })
 
-let pendingPosition: { x: number; y: number } | null = null
-
 const handleOpen = (e: Event) => {
   const detail = (e as CustomEvent).detail
-  pendingPosition = detail || null
   form.value = {
     name: '',
     phone: '',

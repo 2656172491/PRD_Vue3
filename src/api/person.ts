@@ -1,7 +1,7 @@
 import request from './request'
 
-export const getPersons = () => request.get('/persons')
-export const searchPersons = (keyword: string) => request.get('/persons/search', { params: { keyword } })
+export const getPersons = (): Promise<any[]> => request.get('/persons')
+export const searchPersons = (keyword: string): Promise<any[]> => request.get('/persons/search', { params: { keyword } })
 export const getPerson = (id: number) => request.get(`/persons/${id}`)
 export const createPerson = (data: any) => request.post('/persons', data)
 export const updatePerson = (id: number, data: any) => request.put(`/persons/${id}`, data)
