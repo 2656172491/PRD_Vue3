@@ -15,38 +15,31 @@
       </div>
 
       <div class="detail-body">
-        <el-form label-position="top" size="small">
-          <el-form-item label="电话">
-            <el-input v-model="form.phone" placeholder="电话号码" @blur="handleSave" />
-          </el-form-item>
-          <el-form-item label="邮箱">
-            <el-input v-model="form.email" placeholder="邮箱地址" @blur="handleSave" />
-          </el-form-item>
-          <el-form-item label="地址">
-            <el-input v-model="form.address" placeholder="居住地址" @blur="handleSave" />
-          </el-form-item>
-          <el-form-item label="爱好">
-            <el-input v-model="form.hobby" placeholder="兴趣爱好" @blur="handleSave" />
-          </el-form-item>
-          <el-form-item label="初识时间">
-            <el-date-picker v-model="form.firstMetDate" type="date" placeholder="选择日期" style="width: 100%" @change="handleSave" />
-          </el-form-item>
-          <el-form-item label="初识地点">
-            <el-input v-model="form.firstMetPlace" placeholder="初识地点" @blur="handleSave" />
-          </el-form-item>
-          <el-form-item label="备注">
-            <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="备注信息" @blur="handleSave" />
-          </el-form-item>
+        <!-- 姓名始终可编辑 -->
+        <div class="field-item">
+          <label>姓名</label>
+          <el-input v-model="editName" @blur="handleSave" />
+        </div>
 
-          <!-- 自定义字段 -->
-          <div v-if="customFields.length > 0" class="custom-fields">
-            <el-form-item v-for="(field, idx) in customFields" :key="idx" :label="field.key">
-              <el-input v-model="field.value" @blur="handleSave" />
-            </el-form-item>
-          </div>
+        <!-- 动态渲染 data 中的所有字段 -->
+        <div v-for="(_value, key) in editData" :key="key" class="field-item">
+          <label>
+            {{ key }}
+            <el-icon class="delete-icon" @click="removeField(key)"><Delete /></el-icon>
+          </label>
+          <el-input
+            v-model="editData[key]"
+            :placeholder="key"
+            @blur="handleSave"
+          />
+        </div>
 
-          <el-button text :icon="Plus" @click="showAddField = true">添加自定义字段</el-button>
-        </el-form>
+        <!-- 添加新字段 -->
+        <div class="add-field-row">
+          <el-input v-model="newFieldKey" placeholder="新字段名称" size="small" style="width: 120px" />
+          <el-input v-model="newFieldValue" placeholder="值" size="small" @keyup.enter="addField" />
+          <el-button :icon="Plus" size="small" @click="addField" />
+        </div>
 
         <!-- 关联关系 -->
         <div class="relations-section">
@@ -61,40 +54,24 @@
               <span class="relation-person">{{ getOtherPersonName(rel) }}</span>
               <span class="relation-types">{{ rel.relationTypes?.join(' / ') }}</span>
             </div>
+            <div v-if="relatedRelations.length === 0" class="empty-relations">
+              暂无关联关系
+            </div>
           </div>
         </div>
       </div>
     </div>
-
-    <!-- 添加自定义字段弹窗 -->
-    <el-dialog v-model="showAddField" title="添加自定义字段" width="360px">
-      <el-form label-width="60px">
-        <el-form-item label="名称">
-          <el-input v-model="newFieldKey" placeholder="如：公司、生日" />
-        </el-form-item>
-        <el-form-item label="值">
-          <el-input v-model="newFieldValue" placeholder="字段值" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showAddField = false">取消</el-button>
-        <el-button type="primary" @click="handleAddField">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Close, Plus } from '@element-plus/icons-vue'
+import { Close, Plus, Delete } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { updatePerson } from '../api/person'
 import { ElMessage } from 'element-plus'
 
 const graphStore = useGraphStore()
-const showAddField = ref(false)
-const newFieldKey = ref('')
-const newFieldValue = ref('')
 
 const person = computed(() => {
   if (!graphStore.selectedNodeId) return null
@@ -136,41 +113,59 @@ const jumpToPerson = (id: number) => {
   graphStore.selectNode(String(id))
 }
 
-const form = ref<any>({})
-const customFields = ref<{ key: string; value: any }[]>([])
+// 编辑状态
+const editName = ref('')
+const editData = ref<Record<string, string>>({})
+const newFieldKey = ref('')
+const newFieldValue = ref('')
 
 watch(() => person.value, (p) => {
   if (p) {
-    form.value = { ...p }
-    const cf = p.customFields || {}
-    customFields.value = Object.entries(cf).map(([key, value]) => ({ key, value }))
+    editName.value = p.name || ''
+    editData.value = {}
+    if (p.data) {
+      Object.entries(p.data).forEach(([k, v]) => {
+        editData.value[k] = v != null ? String(v) : ''
+      })
+    }
   }
 }, { immediate: true })
 
-const handleSave = async () => {
-  if (!person.value) return
-  const data: any = { ...form.value }
-  // 转换自定义字段
-  const cf: Record<string, any> = {}
-  customFields.value.forEach((f) => {
-    if (f.key) cf[f.key] = f.value
-  })
-  data.customFields = cf
-  await updatePerson(person.value.id, data)
-  graphStore.updatePerson(data)
-  ElMessage.success('保存成功')
-}
-
-const handleAddField = () => {
-  if (!newFieldKey.value.trim()) return
-  customFields.value.push({
-    key: newFieldKey.value,
-    value: newFieldValue.value,
-  })
-  showAddField.value = false
+const addField = () => {
+  if (!newFieldKey.value.trim()) {
+    ElMessage.warning('请输入字段名称')
+    return
+  }
+  const key = newFieldKey.value.trim()
+  editData.value[key] = newFieldValue.value
   newFieldKey.value = ''
   newFieldValue.value = ''
   handleSave()
+}
+
+const removeField = (key: string) => {
+  delete editData.value[key]
+  handleSave()
+}
+
+const handleSave = async () => {
+  if (!person.value) return
+  const data: Record<string, any> = {}
+  Object.entries(editData.value).forEach(([k, v]) => {
+    if (v !== '' && v !== null && v !== undefined) {
+      data[k] = v
+    }
+  })
+  await updatePerson(person.value.id, {
+    name: editName.value,
+    data,
+  })
+  graphStore.updatePerson({
+    id: person.value.id,
+    name: editName.value,
+    data,
+  })
+  ElMessage.success('保存成功')
 }
 </script>
 
@@ -251,15 +246,38 @@ const handleAddField = () => {
   flex: 1;
   padding: 16px 20px;
   overflow-y: auto;
+}
 
-  :deep(.el-form-item__label) {
-    color: #94a3b8;
+.field-item {
+  margin-bottom: 12px;
+
+  label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 12px;
-    padding-bottom: 4px;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    text-transform: capitalize;
+
+    .delete-icon {
+      font-size: 12px;
+      color: #64748b;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s;
+
+      &:hover {
+        color: #ef4444;
+      }
+    }
+
+    &:hover .delete-icon {
+      opacity: 1;
+    }
   }
 
-  :deep(.el-input__wrapper),
-  :deep(.el-textarea__inner) {
+  :deep(.el-input__wrapper) {
     background: rgba(30, 41, 59, 0.6);
     box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.15);
 
@@ -268,13 +286,29 @@ const handleAddField = () => {
     }
   }
 
-  :deep(.el-input__inner),
-  :deep(.el-textarea__inner) {
+  :deep(.el-input__inner) {
     color: #e2e8f0;
 
     &::placeholder {
       color: #475569;
     }
+  }
+}
+
+.add-field-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+
+  :deep(.el-input__wrapper) {
+    background: rgba(30, 41, 59, 0.6);
+    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.15);
+  }
+
+  :deep(.el-input__inner) {
+    color: #e2e8f0;
   }
 }
 
@@ -325,5 +359,12 @@ const handleAddField = () => {
     padding: 2px 8px;
     border-radius: 10px;
   }
+}
+
+.empty-relations {
+  text-align: center;
+  padding: 20px;
+  color: #475569;
+  font-size: 13px;
 }
 </style>
