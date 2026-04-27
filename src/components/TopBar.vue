@@ -16,26 +16,19 @@
     </div>
     <div class="actions">
       <el-button type="primary" :icon="Plus" @click="handleAdd">添加联系人</el-button>
-      <el-button :icon="RefreshLeft" :disabled="!canUndo" @click="handleUndo">撤销</el-button>
-      <el-button :icon="RefreshRight" :disabled="!canRedo" @click="handleRedo">重做</el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Plus, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
-import { useHistoryStore } from '../stores/historyStore'
 import { searchPersons } from '../api/person'
 
 const graphStore = useGraphStore()
-const historyStore = useHistoryStore()
 
 const searchKeyword = ref('')
-
-const canUndo = computed(() => historyStore.canUndo())
-const canRedo = computed(() => historyStore.canRedo())
 
 const handleSearch = async () => {
   if (!searchKeyword.value.trim()) {
@@ -55,14 +48,6 @@ const handleClear = () => {
 
 const handleAdd = () => {
   window.dispatchEvent(new CustomEvent('add-person'))
-}
-
-const handleUndo = () => {
-  window.dispatchEvent(new CustomEvent('undo-action'))
-}
-
-const handleRedo = () => {
-  window.dispatchEvent(new CustomEvent('redo-action'))
 }
 </script>
 
