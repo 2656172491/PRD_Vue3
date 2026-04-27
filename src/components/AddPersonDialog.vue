@@ -6,11 +6,11 @@
       </el-form-item>
       <el-form-item label="分组">
         <div class="group-row">
-          <el-select v-model="form.groupId" placeholder="选择分组" clearable style="width: 100%">
+          <el-select v-model="form.groupId" placeholder="选择分组" style="width: 100%">
             <el-option
-              v-for="group in graphStore.groups"
+              v-for="group in allGroupsFlat"
               :key="group.id"
-              :label="group.name"
+              :label="group.indent + group.name"
               :value="group.id"
             />
           </el-select>
@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { createPerson, getPersons } from '../api/person'
@@ -84,11 +84,31 @@ const presetData = ref<Record<string, string>>({
 })
 const extraFields = ref<{ key: string; value: string }[]>([])
 
+// 扁平化分组列表（显示嵌套层级）
+const allGroupsFlat = computed(() => {
+  const groups = graphStore.groups
+  const result: { id: number; name: string; indent: string }[] = []
+
+  const traverse = (parentId: number | null, indent: string) => {
+    groups
+      .filter((g) => (parentId === null ? !g.parentId : g.parentId === parentId))
+      .forEach((g) => {
+        result.push({ id: g.id, name: g.name, indent })
+        traverse(g.id, indent + '　') // 全角空格缩进
+      })
+  }
+
+  traverse(null, '')
+  return result
+})
+
 const handleOpen = (e: Event) => {
   const detail = (e as CustomEvent).detail
+  // 默认使用"未分组"分组ID
+  const defaultGroupId = graphStore.ungroupedId
   form.value = {
     name: '',
-    groupId: null,
+    groupId: defaultGroupId,
     positionX: detail?.x || Math.random() * 600,
     positionY: detail?.y || Math.random() * 400,
   }

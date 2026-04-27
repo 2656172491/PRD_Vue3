@@ -13,10 +13,10 @@
         </div>
         <div class="group-list">
           <div
-            v-for="group in graphStore.groups"
+            v-for="group in groupsTreeFlat"
             :key="group.id"
             class="group-item"
-            :style="{ borderLeftColor: group.color || '#38bdf8' }"
+            :style="{ borderLeftColor: group.color || '#38bdf8', paddingLeft: `${12 + group.level * 16}px` }"
             @click="handleSelectGroup(group.id)"
             :class="{ active: selectedGroupId === group.id }"
           >
@@ -38,11 +38,11 @@
         <div class="relation-type-list">
           <div
             v-for="type in graphStore.relationTypes"
-            :key="type"
+            :key="type.id"
             class="relation-type-item"
           >
-            <span class="type-dot" :style="{ background: getTypeColor(type) }" />
-            <span class="type-name">{{ type }}</span>
+            <span class="type-dot" :style="{ background: type.color || '#94a3b8' }" />
+            <span class="type-name">{{ type.typeName }}</span>
           </div>
           <div v-if="graphStore.relationTypes.length === 0" class="empty-hint">
             暂无关系类型
@@ -53,12 +53,22 @@
 
     <!-- 新建分组弹窗 -->
     <el-dialog v-model="showAddGroup" title="新建分组" width="360px">
-      <el-form :model="groupForm" label-width="60px">
+      <el-form :model="groupForm" label-width="80px">
         <el-form-item label="名称">
           <el-input v-model="groupForm.name" placeholder="分组名称" />
         </el-form-item>
         <el-form-item label="颜色">
           <el-color-picker v-model="groupForm.color" />
+        </el-form-item>
+        <el-form-item label="父分组">
+          <el-select v-model="groupForm.parentId" placeholder="选择父分组（可选）" clearable style="width: 100%">
+            <el-option
+              v-for="group in availableParentGroups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.id"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -83,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { ArrowLeft, ArrowRight, Plus } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { createGroup, getGroups } from '../api/group'
@@ -96,22 +106,18 @@ const selectedGroupId = ref<number | null>(null)
 
 // 分组
 const showAddGroup = ref(false)
-const groupForm = ref({ name: '', color: '#38bdf8' })
+const groupForm = ref({ name: '', color: '#38bdf8', parentId: null as number | null })
 
 // 关系类型
 const showAddRelationType = ref(false)
 const relationTypeForm = ref({ name: '' })
 
-// 关系类型颜色映射
-const typeColorMap: Record<string, string> = {}
+// 关系类型颜色
 const typeColors = ['#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#fb7185', '#34d399', '#fbbf24', '#a78bfa']
 
-const getTypeColor = (type: string) => {
-  if (!typeColorMap[type]) {
-    const idx = Object.keys(typeColorMap).length % typeColors.length
-    typeColorMap[type] = typeColors[idx]
-  }
-  return typeColorMap[type]
+const getNewTypeColor = () => {
+  const idx = graphStore.relationTypes.length % typeColors.length
+  return typeColors[idx]
 }
 
 const getGroupCount = (groupId: number) => {
@@ -123,17 +129,47 @@ const handleSelectGroup = (groupId: number) => {
   // 可选：触发分组筛选逻辑
 }
 
+const availableParentGroups = computed(() => {
+  return graphStore.groups.filter((g) => !g.parentId)
+})
+
+// 树形扁平化分组列表
+const groupsTreeFlat = computed(() => {
+  const groups = graphStore.groups
+  const result: { id: number; name: string; color: string; level: number }[] = []
+
+  const traverse = (parentId: number | null, level: number) => {
+    groups
+      .filter((g) => (parentId === null ? !g.parentId : g.parentId === parentId))
+      .forEach((g) => {
+        result.push({ id: g.id, name: g.name, color: g.color, level })
+        traverse(g.id, level + 1)
+      })
+  }
+
+  traverse(null, 0)
+  return result
+})
+
 const handleCreateGroup = async () => {
   if (!groupForm.value.name.trim()) {
     ElMessage.warning('请输入分组名称')
     return
   }
   try {
-    await createGroup(groupForm.value)
+    const payload: any = {
+      name: groupForm.value.name,
+      color: groupForm.value.color,
+      collapsed: false,
+    }
+    if (groupForm.value.parentId !== null) {
+      payload.parentId = groupForm.value.parentId
+    }
+    await createGroup(payload)
     const groups = await getGroups()
     graphStore.setGroups(groups || [])
     showAddGroup.value = false
-    groupForm.value = { name: '', color: '#38bdf8' }
+    groupForm.value = { name: '', color: '#38bdf8', parentId: null }
     ElMessage.success('分组创建成功')
   } catch (err) {
     ElMessage.error('创建失败')
@@ -145,14 +181,15 @@ const handleCreateRelationType = async () => {
     ElMessage.warning('请输入关系类型名称')
     return
   }
-  if (graphStore.relationTypes.includes(relationTypeForm.value.name.trim())) {
+  const trimmedName = relationTypeForm.value.name.trim()
+  if (graphStore.relationTypes.some((t) => t.typeName === trimmedName)) {
     ElMessage.warning('该关系类型已存在')
     return
   }
   try {
-    await createRelationType({ typeName: relationTypeForm.value.name.trim() })
+    await createRelationType({ typeName: trimmedName, color: getNewTypeColor() })
     const types = await getRelationTypes()
-    graphStore.setRelationTypes(types.map((t: any) => t.typeName))
+    graphStore.setRelationTypes(types)
     showAddRelationType.value = false
     relationTypeForm.value = { name: '' }
     ElMessage.success('关系类型创建成功')

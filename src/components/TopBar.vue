@@ -21,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { useGraphStore } from '../stores/graphStore'
 import { searchPersons } from '../api/person'

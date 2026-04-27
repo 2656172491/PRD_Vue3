@@ -3,10 +3,11 @@
     <el-checkbox-group v-model="selectedTypes">
       <el-checkbox
         v-for="type in graphStore.relationTypes"
-        :key="type"
-        :label="type"
+        :key="type.id"
+        :label="type.typeName"
       >
-        {{ type }}
+        <span class="type-dot" :style="{ background: type.color || '#94a3b8' }"></span>
+        {{ type.typeName }}
       </el-checkbox>
     </el-checkbox-group>
     <div class="new-type">
@@ -35,6 +36,8 @@ const selectedTypes = ref<string[]>([])
 const newType = ref('')
 let callback: ((types: string[]) => void) | null = null
 
+const typeColors = ['#38bdf8', '#818cf8', '#c084fc', '#f472b6', '#fb7185', '#34d399', '#fbbf24', '#a78bfa']
+
 const handleOpen = (e: Event) => {
   const detail = (e as CustomEvent).detail
   callback = detail.callback
@@ -45,15 +48,17 @@ const handleOpen = (e: Event) => {
 
 const handleAddType = async () => {
   if (!newType.value.trim()) return
-  if (graphStore.relationTypes.includes(newType.value.trim())) {
+  const trimmedName = newType.value.trim()
+  if (graphStore.relationTypes.some((t) => t.typeName === trimmedName)) {
     ElMessage.warning('该类型已存在')
     return
   }
   try {
-    await createRelationType({ typeName: newType.value.trim() })
+    const color = typeColors[graphStore.relationTypes.length % typeColors.length]
+    await createRelationType({ typeName: trimmedName, color })
     const types = await getRelationTypes()
-    graphStore.setRelationTypes(types.map((t: any) => t.typeName))
-    selectedTypes.value.push(newType.value.trim())
+    graphStore.setRelationTypes(types)
+    selectedTypes.value.push(trimmedName)
     newType.value = ''
     ElMessage.success('添加成功')
   } catch (err) {
@@ -63,8 +68,8 @@ const handleAddType = async () => {
 
 const handleConfirm = () => {
   if (selectedTypes.value.length === 0) {
-    ElMessage.warning('请至少选择一种关系类型')
-    return
+    // 未选择时默认使用"默认"
+    selectedTypes.value = ['默认']
   }
   if (callback) {
     callback(selectedTypes.value)
@@ -92,6 +97,14 @@ onUnmounted(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.type-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
 }
 
 :deep(.el-checkbox) {
