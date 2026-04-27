@@ -6,6 +6,8 @@
       <GraphCanvas />
       <PersonDetail />
     </div>
+    <AddPersonDialog />
+    <RelationTypeDialog />
   </div>
 </template>
 
@@ -14,6 +16,8 @@ import TopBar from '../components/TopBar.vue'
 import SideBar from '../components/SideBar.vue'
 import GraphCanvas from '../components/GraphCanvas.vue'
 import PersonDetail from '../components/PersonDetail.vue'
+import AddPersonDialog from '../components/AddPersonDialog.vue'
+import RelationTypeDialog from '../components/RelationTypeDialog.vue'
 </script>
 
 <style scoped lang="scss">
